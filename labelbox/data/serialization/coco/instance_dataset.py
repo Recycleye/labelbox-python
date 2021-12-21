@@ -88,14 +88,16 @@ def segmentations_to_common(class_annotations: COCOObjectAnnotation,
 
 
 def process_label(
-    label: Label,
-    idx: int,
-    image_root: str,
-    max_annotations_per_image=10000
+        label: Label,
+        idx: int,
+        image_root: str,
+        cloud_provider=None,
+        azure_storage_container=None,
+        max_annotations_per_image=10000
 ) -> Tuple[np.ndarray, List[COCOObjectAnnotation], Dict[str, str]]:
     annot_idx = idx * max_annotations_per_image
     image_id = get_image_id(label, idx)
-    image = get_image(label, image_root, image_id)
+    image = get_image(label, image_root, image_id, cloud_provider, azure_storage_container)
     coco_annotations = []
     annotation_lookup = get_annotation_lookup(label.annotations)
     categories = {}
@@ -128,7 +130,9 @@ class CocoInstanceDataset(BaseModel):
     def from_common(cls,
                     labels: LabelCollection,
                     image_root: Path,
-                    max_workers=8):
+                    max_workers=8,
+                    cloud_provider=None,
+                    azure_storage_container=None):
         all_coco_annotations = []
         categories = {}
         images = []
@@ -138,7 +142,7 @@ class CocoInstanceDataset(BaseModel):
         if max_workers:
             with ProcessPoolExecutor(max_workers=max_workers) as exc:
                 futures = [
-                    exc.submit(process_label, label, idx, image_root)
+                    exc.submit(process_label, label, idx, image_root, cloud_provider, azure_storage_container)
                     for idx, label in enumerate(labels)
                 ]
                 results = [
@@ -146,7 +150,7 @@ class CocoInstanceDataset(BaseModel):
                 ]
         else:
             results = [
-                process_label(label, idx, image_root)
+                process_label(label, idx, image_root, cloud_provider, azure_storage_container)
                 for idx, label in enumerate(labels)
             ]
 
