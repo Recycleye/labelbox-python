@@ -66,8 +66,8 @@ def get_image(
         file_path = extract_file_path(label.data.url, azure_storage_container)
         logger.info(f"Downloading {file_path} from blobstorage")
         image = client.download_blob(file_path).readall()
-        h = Image.open(io.BytesIO(image)).height
-        w = Image.open(io.BytesIO(image)).width
+        img = Image.open(io.BytesIO(image))
+        h, w = img.height, img.width
         return CocoImage(
             id=image_id, width=w, height=h, file_name=Path(label.data.url).name
         )
