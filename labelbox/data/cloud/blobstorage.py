@@ -25,6 +25,6 @@ def create_blobstorage_client(azure_connection: str, azure_container_name: str) 
 def get_connection_string() -> str:
     try:
         return os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-    except KeyError as ex:
+    except KeyError:
         logger.exception("Environment variable AZURE_CONNECTION_STRING is not set")
 
