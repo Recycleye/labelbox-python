@@ -4,7 +4,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 from pathlib import Path
 
-from loguru import logger
 import numpy as np
 from tqdm import tqdm
 from pydantic import BaseModel
@@ -156,30 +155,21 @@ class CocoInstanceDataset(BaseModel):
                 process_label(label, idx, image_root, cloud_provider, azure_storage_container)
                 for idx, label in enumerate(labels)
             ]
-        logger.info([i[2] for i in results])
         for result in results:
             images.append(result[0])
             all_coco_annotations.extend(result[1])
             coco_categories.update(result[2])
-        logger.info("####### Coco Cats")
-        logger.info(coco_categories)
         category_mapping = {
             category_id: idx + 1
             for idx, category_id in enumerate(set(coco_categories.values()))
         }
-        logger.info("####### Category Mapping")
-        logger.info(category_mapping)
         categories = [
             Categories(id=idx,
                        name=name,
                        supercategory='all',
                        isthing=1) for name, idx in category_mapping.items()
         ]
-        logger.info("####### All coco annotations")
-        # print([ann.category_id for ann in all_coco_annotations])
         for annot in all_coco_annotations:
-            # print(category_mapping)
-            logger.info(annot.category_id)
             coco_cat_name = coco_categories[annot.category_id]
             annot.category_id = category_mapping[coco_cat_name]
 
