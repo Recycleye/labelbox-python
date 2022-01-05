@@ -26,5 +26,5 @@ def get_connection_string() -> str:
     try:
         return os.environ["AZURE_STORAGE_CONNECTION_STRING"]
     except KeyError:
-        logger.exception("Environment variable AZURE_CONNECTION_STRING is not set")
+        logger.exception("Environment variable AZURE_STORAGE_CONNECTION_STRING is not set")
 
