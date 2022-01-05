@@ -102,28 +102,24 @@ def process_label(
     coco_annotations = []
     annotation_lookup = get_annotation_lookup(label.annotations)
     categories = {}
-    annotation_names = []
-    hash_cat = None
-    for class_name in annotation_lookup:
-        for annotation in annotation_lookup[class_name]:
-            annotation_names.append(annotation.name)
-            if annotation.name not in categories.keys():
-                hash_cat = hash_category_name(annotation.name)
-                categories[hash_cat] = annotation.name
-                # print("Adding {} as {}".format(annotation.name, categories[annotation.name]))
+
+    for class_name, annotations in annotation_lookup.items():
+        for annot_idx, annotation in enumerate(annotations):
+            # Hash category name and store
+            hash_cat = hash_category_name(annotation.name)
+            categories[hash_cat] = annotation.name
+
+            # Select the conversion function for the annotation type
             if isinstance(annotation.value, Mask):
-                coco_annotations.append(
-                    mask_to_coco_object_annotation(annotation, annot_idx,
-                                                   image_id,
-                                                   hash_cat))
+                conv_func = mask_to_coco_object_annotation
             elif isinstance(annotation.value, (Polygon, Rectangle)):
-                coco_annotations.append(
-                    vector_to_coco_object_annotation(
-                        annotation, annot_idx, image_id,
-                        hash_cat))
-            annot_idx += 1
-    # print(set(annotation_names))
-    # print(categories)
+                conv_func = vector_to_coco_object_annotation
+            else:
+                continue
+
+            # Convert the annotation and append to the list
+            coco_annotations.append(conv_func(annotation, annot_idx, image_id, hash_cat))
+
     return image, coco_annotations, categories
 
 
