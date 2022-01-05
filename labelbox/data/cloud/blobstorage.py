@@ -3,19 +3,18 @@ import re
 
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from loguru import logger
+from urllib.parse import urlparse
 
+def extract_file_path(path: str) -> str:
+    """Extract the file path after from a blob storage URL.
 
-def extract_file_path(path: str, container_name: str) -> str:
-    """Given a blobstorage url for a file, extract the file path after
-        container name.
-        Example:
-            https:/{storage-account-name}.blob.core.windows.net/{container-name}/images/1001.jpg
-        returns
-            images/1001.jpg
+    Container name (the first path segment) is excluded.
+
+    >>> path = "https://storage-acct-name.blob.core.windows.net/container/imgs/1001.jpg"
+    >>> extract_file_path(path)
+    ... "imgs/1001.jpg"
     """
-
-    file_path_regex = re.compile(f"{container_name}/(.*)")
-    return file_path_regex.search(path).group(1)
+    return urlparse(path).path.split('/', maxsplit=2)[-1]
 
 
 def create_blobstorage_client(azure_connection: str, azure_container_name: str) -> ContainerClient:
