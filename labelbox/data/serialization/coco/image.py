@@ -57,7 +57,7 @@ def get_image(
         else:
             w, h = imagesize.get(str(path))
         return CocoImage(
-            id=image_id, width=w, height=h, file_name=Path(label.data.url).name
+            id=image_id, width=w, height=h, file_name=Path(path).name
         )
 
     elif cloud_provider == "azure":
