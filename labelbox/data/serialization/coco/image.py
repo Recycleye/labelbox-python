@@ -40,10 +40,10 @@ def get_image(
     cloud_provider=None,
     azure_storage_container=None,
 ) -> CocoImage:
-    """
-    Extracts dimensions from an image provided by 'image_path'. The path may be
-    local or a path in a cloud storage service. In that case,
-    'image_path' should be used together with 'cloud_provider'.
+    """Extract dimensions from an image at 'image_path'.
+
+    The path may be local or a path in a cloud storage service.
+    If on cloud storage, 'image_path' should be used together with 'cloud_provider'.
     Currently, possible values for 'cloud_provider' are:
         - azure
     """
