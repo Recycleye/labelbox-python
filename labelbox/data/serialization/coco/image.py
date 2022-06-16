@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 from typing import Optional, Tuple
 
-from azure_utils.blob import get_blob_metadata
+from azure_utils.blob import get_blob_metadata, set_blob_metadata
 from loguru import logger
 from PIL import Image
 import imagesize
@@ -80,10 +80,22 @@ def get_image(
             w = image_metadata['width']
         else:
             # Metadata doesn't exist so download is required
-            logger.info(f"Downloading {file_path} from blobstorage")
+            logger.warning(f"Downloading {file_path} from blobstorage, height and width metadata"
+                           f"for the image does not exist")
             image = client.download_blob(file_path).readall()
             img = Image.open(io.BytesIO(image))
             h, w = img.height, img.width
+
+            # Setting the metadata since it doesn't exist
+            image_metadata = {'height': str(h), 'width': str(w)}
+            logger.info(f"As metadata for the image doesn't exist, "
+                        f"writing metadata for file: {file_path}, {image_metadata}")
+            set_blob_metadata(
+                azure_connection=conn,
+                azure_container_name=azure_storage_container,
+                azure_blob_name=file_path,
+                metadata=image_metadata
+            )
 
         return CocoImage(
             id=image_id, width=w, height=h, file_name=Path(label.data.url).name.split('?')[0]
