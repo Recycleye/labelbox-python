@@ -16,6 +16,7 @@ from labelbox.data.cloud.blobstorage import (
     extract_file_path,
     get_connection_string,
 )
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 
 class CocoImage(PathSerializerMixin):
@@ -36,6 +37,10 @@ def get_image_id(label: Label, idx: int) -> int:
     return idx
 
 
+@retry(
+    stop=stop_after_attempt(20),
+    wait=wait_fixed(2)
+)
 def get_image(
     label: Label,
     image_path: str,
@@ -66,6 +71,7 @@ def get_image(
     elif cloud_provider == "azure":
         conn = get_connection_string()
         client = create_blobstorage_client(conn, azure_storage_container)
+        print(label.data.url)
         file_path = extract_file_path(label.data.url)
 
         logger.info(f"Checking size of image in: {file_path}, from blobstorage")
