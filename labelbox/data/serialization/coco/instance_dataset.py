@@ -15,6 +15,7 @@ from ...annotation_types.collection import LabelCollection
 from .categories import Categories, hash_category_name
 from .annotation import COCOObjectAnnotation, RLE, get_annotation_lookup, rle_decoding
 from .image import CocoImage, get_image, get_image_id
+from tenacity import retry
 
 
 def mask_to_coco_object_annotation(annotation: ObjectAnnotation, annot_idx: int,
@@ -123,6 +124,7 @@ def bbox_to_common(class_annotations: COCOObjectAnnotation,
     return annotations
 
 
+@retry()
 def process_label(
         label: Label,
         idx: int,
