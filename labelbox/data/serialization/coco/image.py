@@ -71,7 +71,6 @@ def get_image(
     elif cloud_provider == "azure":
         conn = get_connection_string()
         client = create_blobstorage_client(conn, azure_storage_container)
-        print(label.data.url)
         file_path = extract_file_path(label.data.url)
 
         logger.info(f"Checking size of image in: {file_path}, from blobstorage")
@@ -81,11 +80,6 @@ def get_image(
             azure_container_name=azure_storage_container,
             azure_blob_name=file_path
         )
-
-        # Temp logging memory usage
-        logger.info(f"Memory usage is:"
-                    f" {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2}MB")
-
         if 'height' in image_metadata and 'width' in image_metadata:
             # Metadata exists and h and w taken from this instead
             h = image_metadata['height']
