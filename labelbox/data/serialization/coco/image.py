@@ -1,9 +1,7 @@
 import io
-import os
 from pathlib import Path
 from typing import Optional, Tuple
 
-import psutil
 from azure_utils.blob import get_blob_metadata, set_blob_metadata
 from loguru import logger
 from PIL import Image
@@ -16,7 +14,6 @@ from labelbox.data.cloud.blobstorage import (
     extract_file_path,
     get_connection_string,
 )
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 
 class CocoImage(PathSerializerMixin):
@@ -37,10 +34,6 @@ def get_image_id(label: Label, idx: int) -> int:
     return idx
 
 
-@retry(
-    stop=stop_after_attempt(20),
-    wait=wait_fixed(2)
-)
 def get_image(
     label: Label,
     image_path: str,
