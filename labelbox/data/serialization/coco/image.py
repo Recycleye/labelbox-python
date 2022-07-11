@@ -36,7 +36,7 @@ def get_image_id(label: Label, idx: int) -> int:
 
 def get_image(
     label: Label,
-    image_path: Path,
+    image_path: str,
     image_id: str,
     cloud_provider=None,
     azure_storage_container=None,
@@ -75,7 +75,6 @@ def get_image(
         )
         if 'height' in image_metadata and 'width' in image_metadata:
             # Metadata exists and h and w taken from this instead
-            logger.info(f"Using metadata {image_metadata} to extract and check image size")
             h = image_metadata['height']
             w = image_metadata['width']
         else:
