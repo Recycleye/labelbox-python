@@ -96,8 +96,9 @@ def get_image(
                 metadata=image_metadata
             )
 
+        file_name = Path(label.data.url.split('?')[0]).name
         return CocoImage(
-            id=image_id, width=w, height=h, file_name=Path(label.data.url.split('?')[0]).name
+            id=image_id, width=w, height=h, file_name=file_name
         )
 
 
