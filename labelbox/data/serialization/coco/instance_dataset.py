@@ -111,6 +111,22 @@ def segmentations_to_common(class_annotations: COCOObjectAnnotation,
     return annotations
 
 
+def bbox_to_common(class_annotations: COCOObjectAnnotation,
+                            class_name: str) -> List[ObjectAnnotation]:
+    # Technically it is rectangles. But the key in coco is called bboxes..
+    annotations = []
+    annotations.append(
+        ObjectAnnotation(
+            name=class_name,
+            value=Rectangle(
+                start=Point(x=class_annotations.bbox[0], y=class_annotations.bbox[1]),
+                end=Point(x=class_annotations.bbox[0]+class_annotations.bbox[2], y=class_annotations.bbox[1]+class_annotations.bbox[3])
+            )
+        )
+    )
+    return annotations
+
+
 def object_annotation_to_coco(
         annotation: ObjectAnnotation, annot_idx: int, image_id: int,
         category_id: int) -> Optional[COCOObjectAnnotation]:
@@ -237,8 +253,13 @@ class CocoInstanceDataset(BaseModel):
                             class_annotations, category_lookup[
                                 class_annotations.category_id].name))
                 elif isinstance(class_annotations.segmentation, list):
-                    annotations.extend(
-                        segmentations_to_common(
+                    if len(class_annotations.segmentation) == 0 and len(class_annotations.bbox) == 4:
+                        annotations.extend(bbox_to_common(
                             class_annotations, category_lookup[
                                 class_annotations.category_id].name))
+                    else:
+                        annotations.extend(
+                            segmentations_to_common(
+                                class_annotations, category_lookup[
+                                    class_annotations.category_id].name))
             yield Label(data=data, annotations=annotations)
