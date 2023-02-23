@@ -14,6 +14,8 @@ from labelbox.data.cloud.blobstorage import (
     get_connection_string,
 )
 
+from azure_utils.blob import get_blob_metadata, set_blob_metadata
+
 
 class CocoImage(PathSerializerMixin):
     id: int
@@ -64,12 +66,39 @@ def get_image(
         conn = get_connection_string()
         client = create_blobstorage_client(conn, azure_storage_container)
         file_path = extract_file_path(label.data.url)
-        logger.info(f"Downloading {file_path} from blobstorage")
-        image = client.download_blob(file_path).readall()
-        img = Image.open(io.BytesIO(image))
-        h, w = img.height, img.width
+
+        logger.info(f"Checking size of image in: {file_path}, from blobstorage")
+        # Check is done on the image if height and width exists as metadata
+        image_metadata = get_blob_metadata(
+            azure_connection=conn,
+            azure_container_name=azure_storage_container,
+            azure_blob_name=file_path
+        )
+        if 'height' in image_metadata and 'width' in image_metadata:
+            # Metadata exists and h and w taken from this instead
+            h = image_metadata['height']
+            w = image_metadata['width']
+        else:
+            # Metadata doesn't exist so download is required
+            logger.warning(f"Downloading {file_path} from blobstorage, height and width metadata"
+                           f"for the image does not exist")
+            image = client.download_blob(file_path).readall()
+            img = Image.open(io.BytesIO(image))
+            h, w = img.height, img.width
+
+            # Setting the metadata since it doesn't exist
+            image_metadata = {'height': str(h), 'width': str(w)}
+            logger.info(f"As metadata for the image doesn't exist, "
+                        f"writing metadata for file: {file_path}, {image_metadata}")
+            set_blob_metadata(
+                azure_connection=conn,
+                azure_container_name=azure_storage_container,
+                azure_blob_name=file_path,
+                metadata=image_metadata
+            )
+
         return CocoImage(
-            id=image_id, width=w, height=h, file_name=Path(label.data.url).name
+            id=image_id, width=w, height=h, file_name=Path(label.data.url.split('?')[0]).name
         )
 
 
