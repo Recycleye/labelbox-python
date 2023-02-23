@@ -37,7 +37,7 @@ def get_image_id(label: Label, idx: int) -> int:
 
 def get_image(
     label: Label,
-    image_path: Path,
+    image_path: str,
     image_id: str,
     cloud_provider=None,
     azure_storage_container=None,

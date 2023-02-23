@@ -15,8 +15,13 @@ from ...annotation_types.collection import LabelCollection
 from .categories import Categories, hash_category_name
 from .annotation import COCOObjectAnnotation, RLE, get_annotation_lookup, rle_decoding
 from .image import CocoImage, get_image, get_image_id
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 
+@retry(
+    stop=stop_after_attempt(20),
+    wait=wait_fixed(2)
+)
 def mask_to_coco_object_annotation(
         annotation: ObjectAnnotation, annot_idx: int, image_id: int,
         category_id: int) -> Optional[COCOObjectAnnotation]:
@@ -150,7 +155,7 @@ def process_label(
 ) -> Tuple[np.ndarray, List[COCOObjectAnnotation], Dict[str, str]]:
     annot_idx = idx * max_annotations_per_image
     image_id = get_image_id(label, idx)
-    image = get_image(label, Path(image_root), str(image_id), cloud_provider, azure_storage_container)
+    image = get_image(label, image_root, str(image_id), cloud_provider, azure_storage_container)
     coco_annotations = []
     annotation_lookup = get_annotation_lookup(label.annotations)
     categories = {}
