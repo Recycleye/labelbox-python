@@ -5,11 +5,12 @@ import time
 import uuid
 from enum import Enum
 from types import SimpleNamespace
+from typing import Type
 
 import pytest
 import requests
 
-from labelbox import Client
+from labelbox import Client, MediaType
 from labelbox import LabelingFrontend
 from labelbox import OntologyBuilder, Tool, Option, Classification, MediaType
 from labelbox.orm import query
@@ -21,6 +22,8 @@ from labelbox.schema.queue_mode import QueueMode
 from labelbox.schema.user import User
 
 IMG_URL = "https://picsum.photos/200/300.jpg"
+DATA_ROW_PROCESSING_WAIT_TIMEOUT_SECONDS = 30
+DATA_ROW_PROCESSING_WAIT_SLEEP_INTERNAL_SECONDS = 5
 
 
 class Environ(Enum):
@@ -29,6 +32,7 @@ class Environ(Enum):
     STAGING = 'staging'
     ONPREM = 'onprem'
     CUSTOM = 'custom'
+    STAGING_EU = 'staging-eu'
 
 
 @pytest.fixture(scope="session")
@@ -51,6 +55,8 @@ def graphql_url(environ: str) -> str:
         return 'https://api.labelbox.com/graphql'
     elif environ == Environ.STAGING:
         return 'https://api.lb-stage.xyz/graphql'
+    elif environ == Environ.STAGING_EU:
+        return 'https://api.eu-de.lb-stage.xyz/graphql'
     elif environ == Environ.ONPREM:
         hostname = os.environ.get('LABELBOX_TEST_ONPREM_HOSTNAME', None)
         if hostname is None:
@@ -70,6 +76,8 @@ def rest_url(environ: str) -> str:
         return 'https://api.labelbox.com/api/v1'
     elif environ == Environ.STAGING:
         return 'https://api.lb-stage.xyz/api/v1'
+    elif environ == Environ.STAGING_EU:
+        return 'https://api.eu-de.lb-stage.xyz/api/v1'
     elif environ == Environ.CUSTOM:
         rest_api_endpoint = os.environ.get('LABELBOX_TEST_REST_API_ENDPOINT')
         if rest_api_endpoint is None:
@@ -83,6 +91,8 @@ def testing_api_key(environ: str) -> str:
         return os.environ["LABELBOX_TEST_API_KEY_PROD"]
     elif environ == Environ.STAGING:
         return os.environ["LABELBOX_TEST_API_KEY_STAGING"]
+    elif environ == Environ.STAGING_EU:
+        return os.environ["LABELBOX_TEST_API_KEY_STAGING_EU"]
     elif environ == Environ.ONPREM:
         return os.environ["LABELBOX_TEST_API_KEY_ONPREM"]
     elif environ == Environ.CUSTOM:
@@ -194,6 +204,13 @@ def pdf_entity_data_row(client):
     }
 
 
+@pytest.fixture(scope="session")
+def conversation_entity_data_row(client):
+    conversation_url = client.upload_file('tests/assets/conversation-1.json')
+
+    return {"row_data": conversation_url, "global_key": str(uuid.uuid1())}
+
+
 @pytest.fixture
 def project(client, rand_gen):
     project = client.create_project(name=rand_gen(str),
@@ -234,7 +251,7 @@ def unique_dataset(client, rand_gen):
 
 
 @pytest.fixture
-def datarow(dataset, image_url):
+def data_row(dataset, image_url):
     task = dataset.create_data_rows([
         {
             "row_data": image_url,
@@ -247,18 +264,27 @@ def datarow(dataset, image_url):
     dr.delete()
 
 
-@pytest.fixture()
-def data_rows(dataset, image_url):
-    dr1 = dict(row_data=image_url, global_key=f"global-key-{uuid.uuid4()}")
-    dr2 = dict(row_data=image_url, global_key=f"global-key-{uuid.uuid4()}")
-    task = dataset.create_data_rows([dr1, dr2])
+# can be used with
+# @pytest.mark.parametrize('data_rows', [<count of data rows>], indirect=True)
+# if omitted, count defaults to 1
+@pytest.fixture
+def data_rows(dataset, image_url, request):
+    count = 1
+    if hasattr(request, 'param'):
+        count = request.param
+
+    datarows = [
+        dict(row_data=image_url, global_key=f"global-key-{uuid.uuid4()}")
+        for _ in range(count)
+    ]
+
+    task = dataset.create_data_rows(datarows)
     task.wait_till_done()
+    datarows = dataset.data_rows().get_many(count)
+    yield datarows
 
-    drs = list(dataset.export_data_rows())
-    yield drs
-
-    for dr in drs:
-        dr.delete()
+    for datarow in datarows:
+        datarow.delete()
 
 
 @pytest.fixture
@@ -353,7 +379,7 @@ def configured_project(project, client, rand_gen, image_url):
 
 @pytest.fixture
 def configured_project_with_label(client, rand_gen, image_url, project, dataset,
-                                  datarow, wait_for_label_processing):
+                                  data_row, wait_for_label_processing):
     """Project with a connected dataset, having one datarow
     Project contains an ontology with 1 bbox tool
     Additionally includes a create_label method for any needed extra labels
@@ -362,9 +388,10 @@ def configured_project_with_label(client, rand_gen, image_url, project, dataset,
     project.datasets.connect(dataset)
 
     ontology = _setup_ontology(project)
-    label = _create_label(project, datarow, ontology, wait_for_label_processing)
+    label = _create_label(project, data_row, ontology,
+                          wait_for_label_processing)
 
-    yield [project, dataset, datarow, label]
+    yield [project, dataset, data_row, label]
 
     for label in project.labels():
         label.delete()
@@ -372,7 +399,7 @@ def configured_project_with_label(client, rand_gen, image_url, project, dataset,
 
 @pytest.fixture
 def configured_batch_project_with_label(client, rand_gen, image_url,
-                                        batch_project, dataset, datarow,
+                                        batch_project, dataset, data_row,
                                         wait_for_label_processing):
     """Project with a batch having one datarow
     Project contains an ontology with 1 bbox tool
@@ -380,24 +407,56 @@ def configured_batch_project_with_label(client, rand_gen, image_url,
     One label is already created and yielded when using fixture
     """
     data_rows = [dr.uid for dr in list(dataset.data_rows())]
+    batch_project._wait_until_data_rows_are_processed(
+        data_row_ids=data_rows,
+        wait_processing_max_seconds=DATA_ROW_PROCESSING_WAIT_TIMEOUT_SECONDS,
+        sleep_interval=DATA_ROW_PROCESSING_WAIT_SLEEP_INTERNAL_SECONDS)
     batch_project.create_batch("test-batch", data_rows)
 
     ontology = _setup_ontology(batch_project)
-    label = _create_label(batch_project, datarow, ontology,
+    label = _create_label(batch_project, data_row, ontology,
                           wait_for_label_processing)
 
-    yield [batch_project, dataset, datarow, label]
+    yield [batch_project, dataset, data_row, label]
 
     for label in batch_project.labels():
         label.delete()
 
 
-def _create_label(project, datarow, ontology, wait_for_label_processing):
+@pytest.fixture
+def configured_batch_project_with_multiple_datarows(batch_project, dataset,
+                                                    data_rows,
+                                                    wait_for_label_processing):
+    """Project with a batch having multiple datarows
+    Project contains an ontology with 1 bbox tool
+    Additionally includes a create_label method for any needed extra labels
+    """
+    global_keys = [dr.global_key for dr in data_rows]
+
+    batch_project._wait_until_data_rows_are_processed(
+        global_keys=global_keys,
+        wait_processing_max_seconds=DATA_ROW_PROCESSING_WAIT_TIMEOUT_SECONDS,
+        sleep_interval=DATA_ROW_PROCESSING_WAIT_SLEEP_INTERNAL_SECONDS)
+    batch_name = f'batch {uuid.uuid4()}'
+    batch_project.create_batch(batch_name, global_keys=global_keys)
+
+    ontology = _setup_ontology(batch_project)
+    for datarow in data_rows:
+        _create_label(batch_project, datarow, ontology,
+                      wait_for_label_processing)
+
+    yield [batch_project, dataset, data_rows]
+
+    for label in batch_project.labels():
+        label.delete()
+
+
+def _create_label(project, data_row, ontology, wait_for_label_processing):
     predictions = [{
         "uuid": str(uuid.uuid4()),
         "schemaId": ontology.tools[0].feature_schema_id,
         "dataRow": {
-            "id": datarow.uid
+            "id": data_row.uid
         },
         "bbox": {
             "top": 20,
@@ -492,6 +551,8 @@ def configured_project_with_complex_ontology(client, rand_gen, image_url):
     project.delete()
 
 
+# NOTE this is nice heuristics, also there is this logic _wait_until_data_rows_are_processed in Project
+#    in case we still have flakiness in the future, we can use it
 @pytest.fixture
 def wait_for_data_row_processing():
     """
@@ -565,3 +626,88 @@ def ontology(client):
                                       MediaType.Image)
     yield ontology
     client.delete_unused_ontology(ontology.uid)
+
+
+@pytest.fixture
+def video_data(client, rand_gen, video_data_row):
+    dataset = client.create_dataset(name=rand_gen(str))
+    data_row_ids = []
+    data_row = dataset.create_data_row(video_data_row)
+    data_row_ids.append(data_row.uid)
+    yield dataset, data_row_ids
+    dataset.delete()
+
+
+@pytest.fixture()
+def video_data_row(rand_gen):
+    return {
+        "row_data":
+            "https://storage.googleapis.com/labelbox-datasets/video-sample-data/sample-video-1.mp4",
+        "global_key":
+            f"https://storage.googleapis.com/labelbox-datasets/video-sample-data/sample-video-1.mp4-{rand_gen(str)}",
+        "media_type":
+            "VIDEO",
+    }
+
+
+class ExportV2Helpers:
+
+    @classmethod
+    def run_project_export_v2_task(cls,
+                                   project,
+                                   num_retries=5,
+                                   task_name=None,
+                                   filters={},
+                                   params={}):
+        task = None
+        params = params if params else {
+            "project_details": True,
+            "performance_details": False,
+            "data_row_details": True,
+            "label_details": True
+        }
+        while (num_retries > 0):
+            task = project.export_v2(task_name=task_name,
+                                     filters=filters,
+                                     params=params)
+            task.wait_till_done()
+            assert task.status == "COMPLETE"
+            assert task.errors is None
+            if len(task.result) == 0:
+                num_retries -= 1
+                time.sleep(5)
+            else:
+                break
+        return task.result
+
+    @classmethod
+    def run_dataset_export_v2_task(cls,
+                                   dataset,
+                                   num_retries=5,
+                                   task_name=None,
+                                   filters={},
+                                   params={}):
+        task = None
+        params = params if params else {
+            "performance_details": False,
+            "label_details": True
+        }
+        while (num_retries > 0):
+            task = dataset.export_v2(task_name=task_name,
+                                     filters=filters,
+                                     params=params)
+            task.wait_till_done()
+            assert task.status == "COMPLETE"
+            assert task.errors is None
+            if len(task.result) == 0:
+                num_retries -= 1
+                time.sleep(5)
+            else:
+                break
+
+        return task.result
+
+
+@pytest.fixture
+def export_v2_test_helpers() -> Type[ExportV2Helpers]:
+    return ExportV2Helpers()
