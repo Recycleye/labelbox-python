@@ -1,8 +1,8 @@
 from typing import Optional
 from uuid import uuid4
-from pydantic import BaseModel, root_validator, validator, Field
+from pydantic import root_validator, validator
 
-from labelbox.utils import _CamelCaseMixin, camel_case, is_exactly_one_set
+from labelbox.utils import _CamelCaseMixin, is_exactly_one_set
 from ...annotation_types.types import Cuid
 
 
@@ -38,14 +38,14 @@ class NDJsonBase(_CamelCaseMixin):
 class NDAnnotation(NDJsonBase):
     name: Optional[str] = None
     schema_id: Optional[Cuid] = None
+    message_id: Optional[str] = None
     page: Optional[int] = None
     unit: Optional[str] = None
 
     @root_validator()
     def must_set_one(cls, values):
-        if ('schema_id' not in values or
-                values['schema_id'] is None) and ('name' not in values or
-                                                  values['name'] is None):
+        if ('schema_id' not in values or values['schema_id']
+                is None) and ('name' not in values or values['name'] is None):
             raise ValueError("Schema id or name are not set. Set either one.")
         return values
 
