@@ -1,17 +1,22 @@
 import uuid
-import ndjson
+from labelbox import parser
 import pytest
 import random
 from labelbox.data.annotation_types.annotation import ObjectAnnotation
+from labelbox.data.annotation_types.classification.classification import Checklist, ClassificationAnnotation, ClassificationAnswer, Radio
+from labelbox.data.annotation_types.data.video import VideoData
+from labelbox.data.annotation_types.geometry.point import Point
+from labelbox.data.annotation_types.geometry.rectangle import Rectangle, RectangleUnit
 from labelbox.data.annotation_types.label import Label
 from labelbox.data.annotation_types.data.text import TextData
 from labelbox.data.annotation_types.ner import DocumentEntity, DocumentTextSelection
+from labelbox.data.annotation_types.video import VideoObjectAnnotation
 
 from labelbox.data.serialization import NDJsonConverter
 from labelbox.exceptions import MALValidationError, UuidError
 from labelbox.schema.bulk_import_request import BulkImportRequest
 from labelbox.schema.enums import BulkImportRequestState
-from labelbox.schema.annotation_import import MALPredictionImport
+from labelbox.schema.annotation_import import LabelImport, MALPredictionImport
 """
 - Here we only want to check that the uploads are calling the validation
 - Then with unit tests we can check the types of errors raised
@@ -85,7 +90,7 @@ def test_create_from_local_file(tmp_path, predictions, configured_project,
     file_name = f"{name}.ndjson"
     file_path = tmp_path / file_name
     with file_path.open("w") as f:
-        ndjson.dump(predictions, f)
+        parser.dump(predictions, f)
 
     bulk_import_request = configured_project.upload_annotations(
         name=name, annotations=str(file_path), validate=False)
@@ -138,7 +143,7 @@ def test_validate_ndjson_uuid(tmp_path, configured_project, predictions):
     repeat_uuid[1]['uuid'] = uid
 
     with file_path.open("w") as f:
-        ndjson.dump(repeat_uuid, f)
+        parser.dump(repeat_uuid, f)
 
     with pytest.raises(UuidError):
         configured_project.upload_annotations(name="name",
@@ -154,7 +159,7 @@ def test_validate_ndjson_uuid(tmp_path, configured_project, predictions):
 @pytest.mark.slow
 def test_wait_till_done(rectangle_inference, configured_project):
     name = str(uuid.uuid4())
-    url = configured_project.client.upload_data(content=ndjson.dumps(
+    url = configured_project.client.upload_data(content=parser.dumps(
         [rectangle_inference]),
                                                 sign=True)
     bulk_import_request = configured_project.upload_annotations(name=name,
@@ -311,7 +316,7 @@ def test_pdf_document_entity(client, configured_project_without_data_rows,
         page=1)
 
     entities_annotation_document_entity = DocumentEntity(
-        name="named_entity", text_selections=[document_text_selection])
+        text_selections=[document_text_selection])
     entities_annotation = ObjectAnnotation(
         name="named-entity", value=entities_annotation_document_entity)
 
@@ -330,6 +335,33 @@ def test_pdf_document_entity(client, configured_project_without_data_rows,
                       entities_annotation,
                   ]))
 
+    import_annotations = MALPredictionImport.create_from_objects(
+        client=client,
+        project_id=configured_project_without_data_rows.uid,
+        name=f"import {str(uuid.uuid4())}",
+        predictions=labels)
+    import_annotations.wait_until_done()
+
+    assert import_annotations.errors == []
+
+
+def test_nested_video_object_annotations(client,
+                                         configured_project_without_data_rows,
+                                         video_data,
+                                         bbox_video_annotation_objects,
+                                         rand_gen):
+    labels = []
+    _, data_row_uids = video_data
+    configured_project_without_data_rows.create_batch(
+        rand_gen(str),
+        data_row_uids,  # sample of data row objects
+        5  # priority between 1(Highest) - 5(lowest)
+    )
+
+    for data_row_uid in data_row_uids:
+        labels.append(
+            Label(data=VideoData(uid=data_row_uid),
+                  annotations=bbox_video_annotation_objects))
     import_annotations = MALPredictionImport.create_from_objects(
         client=client,
         project_id=configured_project_without_data_rows.uid,

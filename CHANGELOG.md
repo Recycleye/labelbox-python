@@ -1,4 +1,137 @@
 # Changelog
+# Version 3.49.1 (2023-06-29)
+## Fixed
+* Removed numpy version lock that caused Python version >3.8 to download incompatible numpy version
+
+# Version 3.49.0 (2023-06-27)
+
+## Changed
+* Improved batch creation logic when more than 1000 global keys provided
+
+## Notebooks
+* Added example on how to access mark in export v2
+* Removed NDJSON library from `examples/basics/custom_embeddings.ipynb`
+* Removed `queue_mode` property from `create_project()` method call.
+
+# Version 3.48.0 (2023-06-13)
+## Added
+* Support for ISO format to exports V2 date filters
+* Support to specify confidence for all free-text annotations
+
+## Changed
+* Removed backports library and replaced it with python dateutil package to parse iso strings
+
+## Notebooks
+* Added predictions to model run example
+* Added notebook to run yolov8 and sam on video and upload to LB
+* Updated google colab notebooks to reflect raster segmentation tool being released on 6/13
+* Updated radio NDJSON annotations format to support confidence
+* Added confidence to all free-text annotations (ndjson)
+* Fixed issues with cv2 library rooting from the Geospatial notebook used a png map with a signed URL with an expired token
+
+# Version 3.47.1 (2023-05-24)
+## Fixed
+* Loading of the ndjson parser when optional [data] libraries (geojson etc.) are not installed
+
+# Version 3.47.0 (2023-05-23)
+## Added
+* Support for interpolated frames to export v2
+
+## Changed
+* Removed ndjson library and replaced it with a custom ndjson parser
+
+## Notebooks
+* Removed confidence scores in annotations - video notebook
+* Removed raster seg masks from video prediction
+* Added export v2 example
+* Added SAM and Labelbox connector notebook
+
+# Version 3.46.0 (2023-05-03)
+## Added
+* Global key support to DataRow Metadata `bulk_upsert()` function
+
+## Notebooks
+* Removed dataset based projects from project setup notebook
+* Updated all links to annotation import and prediction notebooks in examples README
+
+# Version 3.45.0 (2023-04-27)
+## Changed
+* Reduce threshold for async batch creation to 1000 data rows
+
+## Notebooks
+* Added subclassifications to ontology notebook
+* Added conversational and pdf predictions notebooks
+
+# Version 3.44.0 (2023-04-26)
+
+## Added
+* `predictions` param for optionally exporting predictions in model run export v2
+* Limits on `model_run_ids` and `project_ids` on catalog export v2 params
+* `WORKFLOW_ACTION` webhook topic
+* Added `data_row_ids` filter for dataset and project export v2
+
+## Fixed
+* ISO timestamp parsing for datetime metadata
+* Docstring typo for `client.delete_feature_schema_from_ontology()`
+
+## Notebooks
+* Removed mention of embeddings metadata fields
+* Fixed broken colab link on `examples/extras/classification-confusion-matrix.ipynb`
+* Added free text classification example to video annotation import notebook
+* Updated prediction_upload notebooks with Annotation Type examples
+
+# Version 3.43.0 (2023-04-05)
+
+## Added
+* Nested object classifications to `VideoObjectAnnotation`
+* Relationship Annotation Types
+* Added `project_ids` and `model_run_ids` to params in all export_v2 functions
+
+## Fixed
+* VideoMaskAnnotation annotation import
+
+## Notebooks
+* Added DICOM annotation import notebook
+* Added audio annotation import notebook
+* Added HTML annotation import notebook
+* Added relationship examples to annotation import notebooks
+* Added global video classification example
+* Added nested classification examples
+* Added video mask example
+* Added global key and LPOs to queue management notebook
+
+# Version 3.42.0 (2023-03-22)
+
+## Added
+* Message based classifications with annotation types for conversations
+* Video and raster segmentation annotation types
+* Global key support to `ConversationEntity`, `DocumentEntity` and `DicomSegments`
+* DICOM polyline annotation type
+* Confidence attribute to classification annotations
+
+## Changed
+* Increased metadata string size limit to 4096 chars
+* Removed `deletedDataRowGlobalKey` from `get_data_row_ids_for_global_keys()`
+
+## Fixed
+* Annotation data type coercion by Pydantic
+* Error message when end point coordinates are smaller than start point coordinates
+* Some typos in error messages
+
+## Notebooks
+* Refactored video notebook to include annotation types
+* Replaced data row ids with global keys in notebooks
+* Replaced `create_data_row` with `create_data_rows` in notebooks
+
+# Version 3.41.0 (2023-03-15)
+
+## Added
+* New data classes for creating labels: `AudioData`, `ConversationData`, `DicomData`, `DocumentData`, `HTMLData`
+* New `DocumentEntity` annotation type class
+* New parameter `last_activity_end` to `Project.export_labels()`
+
+## Notebooks
+* Updated `annotation_import/pdf.ipynb` with example use of `DocumentEntity` class
 
 # Version 3.40.1 (2023-03-10)
 
@@ -26,7 +159,7 @@
 * Updated `annotation_import/pdf.ipynb` with more examples
 * Added `integrations/huggingface/huggingface.ipynb`
 * Fixed broken links for detectron notebooks in README
-* Added Dataset QueueMode during project creation in `integrations/detectron2/coco_object.ipynb` 
+* Added Dataset QueueMode during project creation in `integrations/detectron2/coco_object.ipynb`
 * Removed metadata and updated ontology in `annotation_import/text.ipynb`
 * Removed confidence scores in `annotation_import/image.ipynb`
 * Updated custom embedding tutorial links in `basics/data_row_metadata.ipynb`
@@ -71,7 +204,7 @@
 
 # Version 3.37.0 (2023-02-08)
 ## Added
-* New `last_activity_start` param to `project.export_labels()` for filtering which labels are exported. See docstring for more on how this works. 
+* New `last_activity_start` param to `project.export_labels()` for filtering which labels are exported. See docstring for more on how this works.
 
 ## Changed
 * Rename `Classification.instructions` to `Classification.name`

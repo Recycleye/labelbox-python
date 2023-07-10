@@ -1,5 +1,6 @@
 import time
 import os
+from typing import Tuple
 import uuid
 
 import pytest
@@ -7,6 +8,8 @@ import requests
 
 from labelbox import Project, LabelingFrontend, Dataset
 from labelbox.exceptions import InvalidQueryError
+from labelbox.schema.data_row import DataRow
+from labelbox.schema.label import Label
 from labelbox.schema.media_type import MediaType
 from labelbox.schema.queue_mode import QueueMode
 
@@ -42,45 +45,69 @@ def test_project(client, rand_gen):
     assert project not in projects
 
 
-def test_project_export_v2(configured_project_with_label):
-    project, _, _, label = configured_project_with_label
+def test_batch_project_export_v2(
+        configured_batch_project_with_label: Tuple[Project, Dataset, DataRow,
+                                                   Label],
+        export_v2_test_helpers, dataset: Dataset, image_url: str):
+    project, dataset, *_ = configured_batch_project_with_label
+
+    batch = list(project.batches())[0]
+    filters = {
+        "last_activity_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        "batch_ids": [batch.uid],
+    }
+    params = {
+        "include_performance_details": True,
+        "include_labels": True,
+        "media_type_override": MediaType.Image
+    }
+    task_name = "test_batch_export_v2"
+    task = dataset.create_data_rows([
+        {
+            "row_data": image_url,
+            "external_id": "my-image"
+        },
+    ] * 2)
+    task.wait_till_done()
+    data_rows = [dr.uid for dr in list(dataset.export_data_rows())]
+    batch_one = f'batch one {uuid.uuid4()}'
+
+    # This test creates two batches, only one batch should be exporter
+    # Creatin second batch that will not be used in the export due to the filter: batch_id
+    project.create_batch(batch_one, data_rows)
+
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        project, task_name=task_name, filters=filters, params=params)
+    assert (batch.size == len(task_results))
+
+
+def test_project_export_v2(client, export_v2_test_helpers,
+                           configured_project_with_label,
+                           wait_for_data_row_processing):
+    project, _, data_row, label = configured_project_with_label
+    data_row = wait_for_data_row_processing(client, data_row)
     label_id = label.uid
-    # Wait for exporter to retrieve latest labels
-    time.sleep(10)
+
     task_name = "test_label_export_v2"
+
+    filters = {
+        "last_activity_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"]
+    }
 
     # TODO: Right now we don't have a way to test this
     include_performance_details = True
-    task = project.export_v2(
-        task_name,
-        filters={
-            "last_activity_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
-            "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"]
-        },
-        params={
-            "include_performance_details": include_performance_details,
-            "include_labels": True,
-            "media_type_override": MediaType.Image
-        })
+    params = {
+        "include_performance_details": include_performance_details,
+        "include_labels": True,
+        "media_type_override": MediaType.Image
+    }
 
-    task_to = project.export_v2(
-        filters={"last_activity_at": [None, "2050-01-01 00:00:00"]})
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        project, task_name=task_name, filters=filters, params=params)
 
-    task_from = project.export_v2(
-        filters={"label_created_at": ["2000-01-01 00:00:00", None]})
-
-    assert task.name == task_name
-    task.wait_till_done()
-    assert task.status == "COMPLETE"
-    assert task.errors is None
-
-    task_to.wait_till_done()
-    assert task_to.status == "COMPLETE"
-
-    task_from.wait_till_done()
-    assert task_from.status == "COMPLETE"
-
-    for task_result in task.result:
+    for task_result in task_results:
         task_project = task_result['projects'][project.uid]
         task_project_label_ids_set = set(
             map(lambda prediction: prediction['id'], task_project['labels']))
@@ -93,6 +120,71 @@ def test_project_export_v2(configured_project_with_label):
         # else:
         #     assert 'include_performance_details' not in task_result or task_result[
         #         'include_performance_details'] is None
+
+    filters = {"last_activity_at": [None, "2050-01-01 00:00:00"]}
+    export_v2_test_helpers.run_project_export_v2_task(project, filters=filters)
+
+    filters = {"label_created_at": ["2000-01-01 00:00:00", None]}
+    export_v2_test_helpers.run_project_export_v2_task(project, filters=filters)
+
+
+def test_project_export_v2_with_iso_date_filters(client, export_v2_test_helpers,
+                                                 configured_project_with_label,
+                                                 wait_for_data_row_processing):
+    project, _, data_row, label = configured_project_with_label
+    data_row = wait_for_data_row_processing(client, data_row)
+    label_id = label.uid
+
+    task_name = "test_label_export_v2_with_iso_date_filters"
+
+    filters = {
+        "last_activity_at": [
+            "2000-01-01T00:00:00+0230", "2050-01-01T00:00:00+0230"
+        ],
+        "label_created_at": [
+            "2000-01-01T00:00:00+0230", "2050-01-01T00:00:00+0230"
+        ]
+    }
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        project, task_name=task_name, filters=filters)
+    assert label_id == task_results[0]['projects'][
+        project.uid]['labels'][0]['id']
+
+    filters = {"last_activity_at": [None, "2050-01-01T00:00:00+0230"]}
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        project, task_name=task_name, filters=filters)
+    assert label_id == task_results[0]['projects'][
+        project.uid]['labels'][0]['id']
+
+    filters = {"label_created_at": ["2050-01-01T00:00:00+0230", None]}
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        project, task_name=task_name, filters=filters)
+    assert len(task_results) == 0
+
+
+@pytest.mark.parametrize("data_rows", [3], indirect=True)
+def test_project_export_v2_datarow_list(
+        export_v2_test_helpers,
+        configured_batch_project_with_multiple_datarows):
+    batch_project, _, data_rows = configured_batch_project_with_multiple_datarows
+
+    data_row_ids = [dr.uid for dr in data_rows]
+    datarow_filter_size = 2
+
+    filters = {
+        "last_activity_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        "data_row_ids": data_row_ids[:datarow_filter_size]
+    }
+    params = {"data_row_details": True, "media_type_override": MediaType.Image}
+    task_results = export_v2_test_helpers.run_project_export_v2_task(
+        batch_project, filters=filters, params=params)
+
+    # only 2 datarows should be exported
+    assert len(task_results) == datarow_filter_size
+    # only filtered datarows should be exported
+    assert set([dr['data_row']['id'] for dr in task_results
+               ]) == set(data_row_ids[:datarow_filter_size])
 
 
 def test_update_project_resource_tags(client, rand_gen):
@@ -271,6 +363,7 @@ def test_batches(batch_project: Project, dataset: Dataset, image_url):
     assert names == {batch_one, batch_two}
 
 
+@pytest.mark.parametrize('data_rows', [2], indirect=True)
 def test_create_batch_with_global_keys_sync(batch_project: Project, data_rows):
     global_keys = [dr.global_key for dr in data_rows]
     batch_name = f'batch {uuid.uuid4()}'
@@ -279,6 +372,7 @@ def test_create_batch_with_global_keys_sync(batch_project: Project, data_rows):
     assert batch_data_rows == set(data_rows)
 
 
+@pytest.mark.parametrize('data_rows', [2], indirect=True)
 def test_create_batch_with_global_keys_async(batch_project: Project, data_rows):
     global_keys = [dr.global_key for dr in data_rows]
     batch_name = f'batch {uuid.uuid4()}'
