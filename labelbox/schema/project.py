@@ -4,10 +4,10 @@ import time
 from collections import namedtuple
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Union
 from urllib.parse import urlparse
 
-import ndjson
+from labelbox import parser
 import requests
 
 from labelbox import utils
@@ -20,7 +20,7 @@ from labelbox.orm.model import Entity, Field, Relationship
 from labelbox.pagination import PaginatedCollection
 from labelbox.schema.consensus_settings import ConsensusSettings
 from labelbox.schema.data_row import DataRow
-from labelbox.schema.export_filters import ProjectExportFilters
+from labelbox.schema.export_filters import ProjectExportFilters, validate_datetime, build_filters
 from labelbox.schema.export_params import ProjectExportParams
 from labelbox.schema.media_type import MediaType
 from labelbox.schema.queue_mode import QueueMode
@@ -45,20 +45,6 @@ except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
-
-
-def _validate_datetime(string_date: str) -> bool:
-    """helper function validate that datetime is as follows: YYYY-MM-DD for the export"""
-    if string_date:
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-            try:
-                datetime.strptime(string_date, fmt)
-                return True
-            except ValueError:
-                pass
-        raise ValueError(f"""Incorrect format for: {string_date}.
-        Format must be \"YYYY-MM-DD\" or \"YYYY-MM-DD hh:mm:ss\"""")
-    return True
 
 
 class Project(DbObject, Updateable, Deletable):
@@ -125,15 +111,18 @@ class Project(DbObject, Updateable, Deletable):
         Note that the queue_mode cannot be changed after a project has been created.
 
         Additionally, the quality setting cannot be changed after a project has been created. The quality mode
-            for a project is inferred through the following attributes:
-            Benchmark:
-                auto_audit_number_of_labels = 1
-                auto_audit_percentage = 1.0
-            Consensus:
-                auto_audit_number_of_labels > 1
-                auto_audit_percentage <= 1.0
-            Attempting to switch between benchmark and consensus modes is an invalid operation and will result
-            in an error.
+        for a project is inferred through the following attributes:
+
+        Benchmark:
+            auto_audit_number_of_labels = 1
+            auto_audit_percentage = 1.0
+
+        Consensus:
+            auto_audit_number_of_labels > 1
+            auto_audit_percentage <= 1.0
+
+        Attempting to switch between benchmark and consensus modes is an invalid operation and will result
+        in an error.
         """
 
         media_type = kwargs.get("media_type")
@@ -151,7 +140,7 @@ class Project(DbObject, Updateable, Deletable):
         """ Fetch all current members for this project
 
         Returns:
-            A `PaginatedCollection of `ProjectMember`s
+            A `PaginatedCollection` of `ProjectMember`s
 
         """
         id_param = "projectId"
@@ -255,7 +244,7 @@ class Project(DbObject, Updateable, Deletable):
                 download_url = res["downloadUrl"]
                 response = requests.get(download_url)
                 response.raise_for_status()
-                return ndjson.loads(response.text)
+                return parser.loads(response.text)
             elif res["status"] == "FAILED":
                 raise LabelboxError("Data row export failed.")
 
@@ -365,7 +354,7 @@ class Project(DbObject, Updateable, Deletable):
                 "start": kwargs.get("start", ""),
                 "end": kwargs.get("end", "")
             }
-            [_validate_datetime(date) for date in created_at_dict.values()]
+            [validate_datetime(date) for date in created_at_dict.values()]
             filter_param_dict["labelCreatedAt"] = "{%s}" % _string_from_dict(
                 created_at_dict, value_with_quotes=True)
 
@@ -374,9 +363,9 @@ class Project(DbObject, Updateable, Deletable):
             last_activity_end = kwargs.get('last_activity_end')
 
             if last_activity_start:
-                _validate_datetime(str(last_activity_start))
+                validate_datetime(str(last_activity_start))
             if last_activity_end:
-                _validate_datetime(str(last_activity_end))
+                validate_datetime(str(last_activity_end))
 
             filter_param_dict["lastActivityAt"] = "{%s}" % _string_from_dict(
                 {
@@ -420,18 +409,19 @@ class Project(DbObject, Updateable, Deletable):
                   filters: Optional[ProjectExportFilters] = None,
                   params: Optional[ProjectExportParams] = None) -> Task:
         """
-        Creates a project run export task with the given params and returns the task.
+        Creates a project export task with the given params and returns the task.
 
         For more information visit: https://docs.labelbox.com/docs/exports-v2#export-from-a-project-python-sdk
         
         >>>     task = project.export_v2(
         >>>         filters={
         >>>             "last_activity_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
-        >>>             "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"]
+        >>>             "label_created_at": ["2000-01-01 00:00:00", "2050-01-01 00:00:00"],
+        >>>             "data_row_ids": [DATA_ROW_ID_1, DATA_ROW_ID_2, ...]
         >>>         },
         >>>         params={
-        >>>             "include_performance_details": False,
-        >>>             "include_labels": True
+        >>>             "performance_details": False,
+        >>>             "label_details": True
         >>>         })
         >>>     task.wait_till_done()
         >>>     task.result
@@ -444,36 +434,31 @@ class Project(DbObject, Updateable, Deletable):
             "project_details": False,
             "performance_details": False,
             "label_details": False,
-            "media_type_override": None
+            "media_type_override": None,
+            "interpolated_frames": False,
         })
 
         _filters = filters or ProjectExportFilters({
             "last_activity_at": None,
-            "label_created_at": None
+            "label_created_at": None,
+            "data_row_ids": None,
+            "batch_ids": None,
         })
-
-        def _get_timezone() -> str:
-            timezone_query_str = """query CurrentUserPyApi { user { timezone } }"""
-            tz_res = self.client.execute(timezone_query_str)
-            return tz_res["user"]["timezone"] or "UTC"
-
-        timezone: Optional[str] = None
 
         mutation_name = "exportDataRowsInProject"
         create_task_query_str = """mutation exportDataRowsInProjectPyApi($input: ExportDataRowsInProjectInput!){
           %s(input: $input) {taskId} }
           """ % (mutation_name)
 
-        search_query: List[Dict[str, Collection[str]]] = []
         media_type_override = _params.get('media_type_override', None)
-        query_params = {
+        query_params: Dict[str, Any] = {
             "input": {
                 "taskName": task_name,
                 "filters": {
                     "projectId": self.uid,
                     "searchQuery": {
                         "scope": None,
-                        "query": search_query
+                        "query": [],
                     }
                 },
                 "params": {
@@ -491,92 +476,19 @@ class Project(DbObject, Updateable, Deletable):
                     "includePerformanceDetails":
                         _params.get('performance_details', False),
                     "includeLabelDetails":
-                        _params.get('label_details', False)
+                        _params.get('label_details', False),
+                    "includeInterpolatedFrames":
+                        _params.get('interpolated_frames', False),
                 },
             }
         }
 
-        if "last_activity_at" in _filters and _filters[
-                'last_activity_at'] is not None:
-            if timezone is None:
-                timezone = _get_timezone()
-            values = _filters['last_activity_at']
-            start, end = values
-            if (start is not None and end is not None):
-                [_validate_datetime(date) for date in values]
-                search_query.append({
-                    "type": "data_row_last_activity_at",
-                    "value": {
-                        "operator": "BETWEEN",
-                        "timezone": timezone,
-                        "value": {
-                            "min": start,
-                            "max": end
-                        }
-                    }
-                })
-            elif (start is not None):
-                _validate_datetime(start)
-                search_query.append({
-                    "type": "data_row_last_activity_at",
-                    "value": {
-                        "operator": "GREATER_THAN_OR_EQUAL",
-                        "timezone": timezone,
-                        "value": start
-                    }
-                })
-            elif (end is not None):
-                _validate_datetime(end)
-                search_query.append({
-                    "type": "data_row_last_activity_at",
-                    "value": {
-                        "operator": "LESS_THAN_OR_EQUAL",
-                        "timezone": timezone,
-                        "value": end
-                    }
-                })
+        search_query = build_filters(self.client, _filters)
+        query_params["input"]["filters"]["searchQuery"]["query"] = search_query
 
-        if "label_created_at" in _filters and _filters[
-                "label_created_at"] is not None:
-            if timezone is None:
-                timezone = _get_timezone()
-            values = _filters['label_created_at']
-            start, end = values
-            if (start is not None and end is not None):
-                [_validate_datetime(date) for date in values]
-                search_query.append({
-                    "type": "labeled_at",
-                    "value": {
-                        "operator": "BETWEEN",
-                        "value": {
-                            "min": start,
-                            "max": end
-                        }
-                    }
-                })
-            elif (start is not None):
-                _validate_datetime(start)
-                search_query.append({
-                    "type": "labeled_at",
-                    "value": {
-                        "operator": "GREATER_THAN_OR_EQUAL",
-                        "value": start
-                    }
-                })
-            elif (end is not None):
-                _validate_datetime(end)
-                search_query.append({
-                    "type": "labeled_at",
-                    "value": {
-                        "operator": "LESS_THAN_OR_EQUAL",
-                        "value": end
-                    }
-                })
-
-        res = self.client.execute(
-            create_task_query_str,
-            query_params,
-        )
+        res = self.client.execute(create_task_query_str,
+                                  query_params,
+                                  error_log_key="errors")
         res = res[mutation_name]
         task_id = res["taskId"]
         user: User = self.client.get_user()
@@ -696,9 +608,9 @@ class Project(DbObject, Updateable, Deletable):
             # python isoformat doesn't accept Z as utc timezone
             result["lastActivityTime"] = datetime.fromisoformat(
                 result["lastActivityTime"].replace('Z', '+00:00'))
-            return LabelerPerformance(
-                **
-                {utils.snake_case(key): value for key, value in result.items()})
+            return LabelerPerformance(**{
+                utils.snake_case(key): value for key, value in result.items()
+            })
 
         return PaginatedCollection(self.client, query_str, {id_param: self.uid},
                                    ["project", "labelerPerformance"],
@@ -846,7 +758,7 @@ class Project(DbObject, Updateable, Deletable):
             consensus_settings = ConsensusSettings(**consensus_settings).dict(
                 by_alias=True)
 
-        if len(dr_ids) >= 10_000:
+        if row_count >= 1_000:
             return self._create_batch_async(name, dr_ids, global_keys, priority,
                                             consensus_settings)
         else:
@@ -882,7 +794,7 @@ class Project(DbObject, Updateable, Deletable):
                                   timeout=180.0,
                                   experimental=True)["project"][method]
         batch = res['batch']
-        batch['size'] = len(dr_ids)
+        batch['size'] = res['batch']['size']
         return Entity.Batch(self.client,
                             self.uid,
                             batch,
@@ -1245,7 +1157,7 @@ class Project(DbObject, Updateable, Deletable):
         """ Fetch all batches that belong to this project
 
         Returns:
-            A `PaginatedCollection of `Batch`es
+            A `PaginatedCollection` of `Batch`es
         """
         id_param = "projectId"
         query_str = """query GetProjectBatchesPyApi($from: String, $first: PageSize, $%s: ID!) {
@@ -1263,7 +1175,7 @@ class Project(DbObject, Updateable, Deletable):
         """ Fetch all task queues that belong to this project
 
         Returns:
-            A `List of `TaskQueue`s
+            A `List` of `TaskQueue`s
         """
         query_str = """query GetProjectTaskQueuesPyApi($projectId: ID!) {
               project(where: {id: $projectId}) {

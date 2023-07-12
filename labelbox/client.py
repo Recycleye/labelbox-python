@@ -109,7 +109,8 @@ class Client:
                 data=None,
                 files=None,
                 timeout=60.0,
-                experimental=False):
+                experimental=False,
+                error_log_key="message"):
         """ Sends a request to the server for the execution of the
         given query.
 
@@ -216,7 +217,7 @@ class Client:
             return None
 
         def get_error_status_code(error):
-            return error["extensions"].get("code")
+            return error["extensions"].get("exception").get("status")
 
         if check_errors(["AUTHENTICATION_ERROR"], "extensions",
                         "code") is not None:
@@ -267,7 +268,7 @@ class Client:
                                                "extensions", "code")
         if malformed_request_error is not None:
             raise labelbox.exceptions.MalformedQueryException(
-                malformed_request_error["message"])
+                malformed_request_error[error_log_key])
 
         # A lot of different error situations are now labeled serverside
         # as INTERNAL_SERVER_ERROR, when they are actually client errors.
@@ -279,6 +280,8 @@ class Client:
 
             if get_error_status_code(internal_server_error) == 400:
                 raise labelbox.exceptions.InvalidQueryError(message)
+            elif get_error_status_code(internal_server_error) == 426:
+                raise labelbox.exceptions.OperationNotAllowedException(message)
             else:
                 raise labelbox.exceptions.InternalServerError(message)
 
@@ -427,7 +430,7 @@ class Client:
     def get_project(self, project_id):
         """ Gets a single Project with the given ID.
 
-            >>> project = client.get_project("<project_id>")
+        >>> project = client.get_project("<project_id>")
 
         Args:
             project_id (str): Unique ID of the Project.
@@ -442,7 +445,7 @@ class Client:
     def get_dataset(self, dataset_id) -> Dataset:
         """ Gets a single Dataset with the given ID.
 
-            >>> dataset = client.get_dataset("<dataset_id>")
+        >>> dataset = client.get_dataset("<dataset_id>")
 
         Args:
             dataset_id (str): Unique ID of the Dataset.
@@ -457,15 +460,14 @@ class Client:
     def get_user(self) -> User:
         """ Gets the current User database object.
 
-            >>> user = client.get_user()
+        >>> user = client.get_user()
         """
         return self._get_single(Entity.User, None)
 
     def get_organization(self) -> Organization:
         """ Gets the Organization DB object of the current user.
 
-            >>> organization = client.get_organization()
-
+        >>> organization = client.get_organization()
         """
         return self._get_single(Entity.Organization, None)
 
@@ -492,7 +494,7 @@ class Client:
     def get_projects(self, where=None) -> List[Project]:
         """ Fetches all the projects the user has access to.
 
-            >>> projects = client.get_projects(where=(Project.name == "<project_name>") & (Project.description == "<project_description>"))
+        >>> projects = client.get_projects(where=(Project.name == "<project_name>") & (Project.description == "<project_description>"))
 
         Args:
             where (Comparison, LogicalOperation or None): The `where` clause
@@ -505,7 +507,7 @@ class Client:
     def get_datasets(self, where=None) -> List[Dataset]:
         """ Fetches one or more datasets.
 
-            >>> datasets = client.get_datasets(where=(Dataset.name == "<dataset_name>") & (Dataset.description == "<dataset_description>"))
+        >>> datasets = client.get_datasets(where=(Dataset.name == "<dataset_name>") & (Dataset.description == "<dataset_description>"))
 
         Args:
             where (Comparison, LogicalOperation or None): The `where` clause
@@ -518,7 +520,7 @@ class Client:
     def get_labeling_frontends(self, where=None) -> List[LabelingFrontend]:
         """ Fetches all the labeling frontends.
 
-            >>> frontend = client.get_labeling_frontends(where=LabelingFrontend.name == "Editor")
+        >>> frontend = client.get_labeling_frontends(where=LabelingFrontend.name == "Editor")
 
         Args:
             where (Comparison, LogicalOperation or None): The `where` clause
@@ -546,7 +548,7 @@ class Client:
         # Also convert Labelbox object values to their UIDs.
         data = {
             db_object_type.attribute(attr) if isinstance(attr, str) else attr:
-            value.uid if isinstance(value, DbObject) else value
+                value.uid if isinstance(value, DbObject) else value
             for attr, value in data.items()
         }
 
@@ -562,9 +564,6 @@ class Client:
 
         Attribute values are passed as keyword arguments.
 
-        >>> project = client.get_project("<project_uid>")
-        >>> dataset = client.create_dataset(name="<dataset_name>", projects=project)
-
         Args:
             iam_integration (IAMIntegration) : Uses the default integration.
                 Optionally specify another integration or set as None to not use delegated access
@@ -574,6 +573,11 @@ class Client:
         Raises:
             InvalidAttributeError: If the Dataset type does not contain
                 any of the attribute names given in kwargs.
+        Examples:
+            Create a dataset
+            >>> dataset = client.create_dataset(name="<dataset_name>")
+            Create a dataset with description
+            >>> dataset = client.create_dataset(name="<dataset_name>", description="<dataset_description>")
         """
         dataset = self._create(Entity.Dataset, kwargs)
 
@@ -702,7 +706,7 @@ class Client:
     def get_model(self, model_id) -> Model:
         """ Gets a single Model with the given ID.
 
-            >>> model = client.get_model("<model_id>")
+        >>> model = client.get_model("<model_id>")
 
         Args:
             model_id (str): Unique ID of the Model.
@@ -717,7 +721,7 @@ class Client:
     def get_models(self, where=None) -> List[Model]:
         """ Fetches all the models the user has access to.
 
-            >>> models = client.get_models(where=(Model.name == "<model_name>"))
+        >>> models = client.get_models(where=(Model.name == "<model_name>"))
 
         Args:
             where (Comparison, LogicalOperation or None): The `where` clause
@@ -1100,7 +1104,7 @@ class Client:
 
         To reuse existing feature schemas, use `create_ontology_from_feature_schemas()`
         More details can be found here:
-            https://github.com/Labelbox/labelbox-python/blob/develop/examples/basics/ontologies.ipynb
+        https://github.com/Labelbox/labelbox-python/blob/develop/examples/basics/ontologies.ipynb
 
         Args:
             name (str): Name of the ontology
@@ -1174,7 +1178,7 @@ class Client:
     def get_model_run(self, model_run_id: str) -> ModelRun:
         """ Gets a single ModelRun with the given ID.
 
-            >>> model_run = client.get_model_run("<model_run_id>")
+        >>> model_run = client.get_model_run("<model_run_id>")
 
         Args:
             model_run_id (str): Unique ID of the ModelRun.
@@ -1394,7 +1398,6 @@ class Client:
                 fetchedDataRows { id }
                 notFoundGlobalKeys
                 accessDeniedGlobalKeys
-                deletedDataRowGlobalKeys
                 } jobStatus}}
             """
         result_params = {
@@ -1417,9 +1420,6 @@ class Client:
                 errors.extend(
                     _format_failed_rows(data['accessDeniedGlobalKeys'],
                                         "Access denied to Data Row"))
-                errors.extend(
-                    _format_failed_rows(data['deletedDataRowGlobalKeys'],
-                                        "Data Row deleted"))
 
                 # Invalid results may contain empty string, so we must filter
                 # them prior to checking for PARTIAL_SUCCESS
@@ -1435,13 +1435,6 @@ class Client:
                     logger.warning(
                         "There are errors present. Please look at 'errors' in the returned dict for more details"
                     )
-
-                # Deprecation notice for deletedDataRowGlobalKeys portion of results
-                if len(data['deletedDataRowGlobalKeys']) > 0:
-                    logger.warning(
-                        """Deprecation Notice: This function will soon no longer return 'Deleted Data Rows' 
-                        as part of the 'results'. Global keys for deleted data rows will soon be placed under 
-                        'Data Row not found' portion.""")
 
                 return {"status": status, "results": results, "errors": errors}
             elif res["dataRowsForGlobalKeysResult"]['jobStatus'] == "FAILED":
@@ -1559,8 +1552,7 @@ class Client:
         Returns:
             CatalogSlice
         """
-        query_str = """
-            query getSavedQueryPyApi($id: ID!) {
+        query_str = """query getSavedQueryPyApi($id: ID!) {
                 getSavedQuery(id: $id) {
                     id
                     name
@@ -1658,7 +1650,7 @@ class Client:
             DeleteFeatureFromOntologyResult: The result of the feature schema removal.
 
         Example:
-            >>> client.remove_feature_schema_from_ontology(<ontology_id>, <feature_schema_id>)
+            >>> client.delete_feature_schema_from_ontology(<ontology_id>, <feature_schema_id>)
         """
         ontology_endpoint = self.rest_endpoint + "/ontologies/" + urllib.parse.quote(
             ontology_id) + "/feature-schemas/" + urllib.parse.quote(

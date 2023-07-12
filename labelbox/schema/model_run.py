@@ -5,7 +5,7 @@ import os
 import time
 import logging
 import requests
-import ndjson
+from labelbox import parser
 from enum import Enum
 
 from labelbox.pagination import PaginatedCollection
@@ -168,7 +168,7 @@ class ModelRun(DbObject):
             if res['status'] == 'COMPLETE':
                 return True
             elif res['status'] == 'FAILED':
-                raise Exception(f"Jop failed. Details : {res['errorMessage']}")
+                raise Exception(f"Job failed. Details : {res['errorMessage']}")
             timeout_seconds -= sleep_time
             if timeout_seconds <= 0:
                 raise TimeoutError(
@@ -489,7 +489,7 @@ class ModelRun(DbObject):
                 else:
                     response = requests.get(url)
                     response.raise_for_status()
-                    return ndjson.loads(response.content)
+                    return parser.loads(response.content)
 
             timeout_seconds -= sleep_time
             if timeout_seconds <= 0:
@@ -531,13 +531,14 @@ class ModelRun(DbObject):
                         _params.get('metadata_fields', False),
                     "includeDataRowDetails":
                         _params.get('data_row_details', False),
+                    "includePredictions":
+                        _params.get('predictions', False),
                 },
             }
         }
-        res = self.client.execute(
-            create_task_query_str,
-            queryParams,
-        )
+        res = self.client.execute(create_task_query_str,
+                                  queryParams,
+                                  error_log_key="errors")
         res = res[mutation_name]
         task_id = res["taskId"]
         user: User = self.client.get_user()
