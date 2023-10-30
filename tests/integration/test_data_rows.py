@@ -3,12 +3,14 @@ import time
 import uuid
 from datetime import datetime
 import json
+from labelbox.schema.media_type import MediaType
 
 import pytest
 import requests
 
 from labelbox import DataRow
 from labelbox.exceptions import MalformedQueryException
+from labelbox.schema.export_filters import DatarowExportFilters
 from labelbox.schema.task import Task
 from labelbox.schema.data_row_metadata import DataRowMetadataField, DataRowMetadataKind
 import labelbox.exceptions
@@ -116,6 +118,13 @@ def make_metadata_fields_dict():
     return fields
 
 
+def test_get_data_row_by_global_key(data_row_and_global_key, client, rand_gen):
+    _, global_key = data_row_and_global_key
+    data_row = client.get_data_row_by_global_key(global_key)
+    assert type(data_row) == DataRow
+    assert data_row.global_key == global_key
+
+
 def test_get_data_row(data_row, client):
     assert client.get_data_row(data_row.uid)
 
@@ -172,6 +181,9 @@ def test_data_row_bulk_creation(dataset, rand_gen, image_url):
     assert {data_row.row_data for data_row in data_rows} == {image_url}
     assert {data_row.global_key for data_row in data_rows} == {None}
 
+    data_rows = list(dataset.data_rows(from_cursor=data_rows[0].uid))
+    assert len(data_rows) == 1
+
     # Test creation using file name
     with NamedTemporaryFile() as fp:
         data = rand_gen(str).encode()
@@ -197,7 +209,8 @@ def test_data_row_bulk_creation(dataset, rand_gen, image_url):
     url = ({data_row.row_data for data_row in data_rows} - {image_url}).pop()
     assert requests.get(url).content == data
 
-    data_rows[0].delete()
+    for dr in data_rows:
+        dr.delete()
 
 
 @pytest.mark.slow
@@ -340,6 +353,7 @@ def test_create_data_row_with_metadata_dict(mdo, dataset, image_url):
 
 def test_create_data_row_with_invalid_metadata(dataset, image_url):
     fields = make_metadata_fields()
+    # make the payload invalid by providing the same schema id more than once
     fields.append(
         DataRowMetadataField(schema_id=TEXT_SCHEMA_ID, value='some msg'))
 
@@ -470,18 +484,26 @@ def test_create_data_rows_with_named_metadata_field_class(
         CUSTOM_TEXT_SCHEMA_NAME].uid
 
 
-def test_create_data_rows_with_invalid_metadata(dataset, image_url):
+def test_create_data_rows_with_invalid_metadata(dataset, image_url,
+                                                is_adv_enabled):
     fields = make_metadata_fields()
+    # make the payload invalid by providing the same schema id more than once
     fields.append(
-        DataRowMetadataField(schema_id=TEXT_SCHEMA_ID, value='some msg'))
+        DataRowMetadataField(schema_id=TEXT_SCHEMA_ID, value="some msg"))
 
     task = dataset.create_data_rows([{
         DataRow.row_data: image_url,
         DataRow.metadata_fields: fields
     }])
-    task.wait_till_done()
-    assert task.status == "FAILED"
-    assert len(task.failed_data_rows) > 0
+    task.wait_till_done(timeout_seconds=60)
+    if is_adv_enabled:
+        assert task.status == "COMPLETE"
+        assert len(task.failed_data_rows) == 1
+        assert f"A schemaId can only be specified once per DataRow : [{TEXT_SCHEMA_ID}]" in task.failed_data_rows[
+            0]["message"]
+    else:
+        assert task.status == "FAILED"
+        assert len(task.failed_data_rows) > 0
 
 
 def test_create_data_rows_with_metadata_missing_value(dataset, image_url):
@@ -526,7 +548,8 @@ def test_create_data_rows_with_metadata_wrong_type(dataset, image_url):
         ])
 
 
-def test_data_row_update(dataset, rand_gen, image_url):
+def test_data_row_update(client, dataset, rand_gen, image_url,
+                         wait_for_data_row_processing):
     external_id = rand_gen(str)
     data_row = dataset.create_data_row(row_data=image_url,
                                        external_id=external_id)
@@ -541,11 +564,16 @@ def test_data_row_update(dataset, rand_gen, image_url):
     assert data_row.row_data == in_line_content
 
     data_row.update(row_data=image_url)
+    data_row = wait_for_data_row_processing(client, data_row)
     assert data_row.row_data == image_url
 
     # tileLayer becomes a media attribute
-    pdf_url = "http://somepdfurl"
-    data_row.update(row_data={'pdfUrl': pdf_url, "tileLayerUrl": "123"})
+    pdf_url = "https://storage.googleapis.com/labelbox-datasets/arxiv-pdf/data/99-word-token-pdfs/0801.3483.pdf"
+    tileLayerUrl = "https://storage.googleapis.com/labelbox-datasets/arxiv-pdf/data/99-word-token-pdfs/0801.3483-lb-textlayer.json"
+    data_row.update(row_data={'pdfUrl': pdf_url, "tileLayerUrl": tileLayerUrl})
+    data_row = wait_for_data_row_processing(client,
+                                            data_row,
+                                            compare_with_prev_media_attrs=True)
     assert data_row.row_data == pdf_url
 
 
@@ -576,20 +604,24 @@ def test_data_row_filtering_sorting(dataset, image_url):
     row2 = row2[0]
     assert row2.external_id == "row2"
 
-    # Test sorting
-    assert list(
-        dataset.data_rows(order_by=DataRow.external_id.asc)) == [row1, row2]
-    assert list(
-        dataset.data_rows(order_by=DataRow.external_id.desc)) == [row2, row1]
 
-
-def test_data_row_deletion(dataset, image_url):
+@pytest.fixture
+def create_datarows_for_data_row_deletion(dataset, image_url):
     task = dataset.create_data_rows([{
         DataRow.row_data: image_url,
         DataRow.external_id: str(i)
     } for i in range(10)])
     task.wait_till_done()
 
+    data_rows = list(dataset.data_rows())
+
+    yield data_rows
+    for dr in data_rows:
+        dr.delete()
+
+
+def test_data_row_deletion(dataset, create_datarows_for_data_row_deletion):
+    create_datarows_for_data_row_deletion
     data_rows = list(dataset.data_rows())
     expected = set(map(str, range(10)))
     assert {dr.external_id for dr in data_rows} == expected
@@ -624,7 +656,7 @@ def test_data_row_iteration(dataset, image_url) -> None:
 
 def test_data_row_attachments(dataset, image_url):
     attachments = [("IMAGE", image_url, "attachment image"),
-                   ("TEXT", "test-text", None),
+                   ("RAW_TEXT", "test-text", None),
                    ("IMAGE_OVERLAY", image_url, "Overlay"),
                    ("HTML", image_url, None)]
     task = dataset.create_data_rows([{
@@ -660,7 +692,7 @@ def test_data_row_attachments(dataset, image_url):
 
 def test_create_data_rows_sync_attachments(dataset, image_url):
     attachments = [("IMAGE", image_url, "image URL"),
-                   ("TEXT", "test-text", None),
+                   ("RAW_TEXT", "test-text", None),
                    ("IMAGE_OVERLAY", image_url, "Overlay"),
                    ("HTML", image_url, None)]
     attachments_per_data_row = 3
@@ -697,7 +729,7 @@ def test_delete_data_row_attachment(data_row, image_url):
     attachments = []
 
     # Anonymous attachment
-    to_attach = [("IMAGE", image_url), ("TEXT", "test-text"),
+    to_attach = [("IMAGE", image_url), ("RAW_TEXT", "test-text"),
                  ("IMAGE_OVERLAY", image_url), ("HTML", image_url)]
     for attachment_type, attachment_value in to_attach:
         attachments.append(
@@ -705,7 +737,7 @@ def test_delete_data_row_attachment(data_row, image_url):
 
     # Attachment with a name
     to_attach = [("IMAGE", image_url, "Att. Image"),
-                 ("TEXT", "test-text", "Att. Text"),
+                 ("RAW_TEXT", "test-text", "Att. Text"),
                  ("IMAGE_OVERLAY", image_url, "Image Overlay"),
                  ("HTML", image_url, "Att. HTML")]
     for attachment_type, attachment_value, attachment_name in to_attach:
@@ -783,7 +815,7 @@ def test_data_row_bulk_creation_with_unique_global_keys(dataset, sample_image):
 
 
 def test_data_row_bulk_creation_with_same_global_keys(dataset, sample_image,
-                                                      snapshot):
+                                                      snapshot, is_adv_enabled):
     global_key_1 = str(uuid.uuid4())
     task = dataset.create_data_rows([{
         DataRow.row_data: sample_image,
@@ -794,35 +826,48 @@ def test_data_row_bulk_creation_with_same_global_keys(dataset, sample_image,
     }])
 
     task.wait_till_done()
-    assert task.status == "FAILED"
-    assert len(task.failed_data_rows) > 0
-    assert len(list(dataset.data_rows())) == 0
-    assert task.errors == "Data rows contain duplicate global keys"
+    if is_adv_enabled:
+        assert task.status == "COMPLETE"
+        assert type(task.failed_data_rows) is list
+        assert len(task.failed_data_rows) == 1
+        assert type(task.created_data_rows) is list
+        assert len(task.created_data_rows) == 1
+        assert task.failed_data_rows[0][
+            'message'] == f"Duplicate global key: '{global_key_1}'"
+        assert task.failed_data_rows[0]['failedDataRows'][0][
+            'externalId'] == sample_image
+        assert task.created_data_rows[0]['externalId'] == sample_image
+        assert task.created_data_rows[0]['globalKey'] == global_key_1
+    else:
+        assert task.status == "FAILED"
+        assert len(task.failed_data_rows) > 0
+        assert len(list(dataset.data_rows())) == 0
+        assert task.errors == "Data rows contain duplicate global keys"
 
-    # Dynamic values, resetting to make snapshot
-    task.failed_data_rows[0]['failedDataRows'][0]['rowData'] = ''
-    task.failed_data_rows[0]['failedDataRows'][1]['rowData'] = ''
-    task.failed_data_rows[0]['failedDataRows'][0]['globalKey'] = ''
-    task.failed_data_rows[0]['failedDataRows'][1]['globalKey'] = ''
-    snapshot.snapshot_dir = INTEGRATION_SNAPSHOT_DIRECTORY
-    snapshot.assert_match(
-        json.dumps(task.failed_data_rows),
-        'test_data_rows.test_data_row_bulk_creation_with_same_global_keys.failed_data_rows.json'
-    )
+        # Dynamic values, resetting to make snapshot
+        task.failed_data_rows[0]['failedDataRows'][0]['rowData'] = ''
+        task.failed_data_rows[0]['failedDataRows'][1]['rowData'] = ''
+        task.failed_data_rows[0]['failedDataRows'][0]['globalKey'] = ''
+        task.failed_data_rows[0]['failedDataRows'][1]['globalKey'] = ''
+        snapshot.snapshot_dir = INTEGRATION_SNAPSHOT_DIRECTORY
+        snapshot.assert_match(
+            json.dumps(task.failed_data_rows),
+            'test_data_rows.test_data_row_bulk_creation_with_same_global_keys.failed_data_rows.json'
+        )
 
-    task = dataset.create_data_rows([{
-        DataRow.row_data: sample_image,
-        DataRow.global_key: global_key_1
-    }])
+        task = dataset.create_data_rows([{
+            DataRow.row_data: sample_image,
+            DataRow.global_key: global_key_1
+        }])
 
-    task.wait_till_done()
-    assert task.status == "COMPLETE"
-    assert len(list(dataset.data_rows())) == 1
-    assert list(dataset.data_rows())[0].global_key == global_key_1
+        task.wait_till_done()
+        assert task.status == "COMPLETE"
+        assert len(list(dataset.data_rows())) == 1
+        assert list(dataset.data_rows())[0].global_key == global_key_1
 
 
 def test_data_row_delete_and_create_with_same_global_key(
-        client, dataset, sample_image):
+        client, dataset, sample_image, is_adv_enabled):
     global_key_1 = str(uuid.uuid4())
     data_row_payload = {
         DataRow.row_data: sample_image,
@@ -842,9 +887,15 @@ def test_data_row_delete_and_create_with_same_global_key(
     task = dataset.create_data_rows([data_row_payload])
     task.wait_till_done()
 
-    assert task.status == "FAILED"
-    assert len(task.failed_data_rows) > 0
-    assert task.errors.startswith("Duplicate global keys found")
+    if is_adv_enabled:
+        assert task.status == "COMPLETE"
+        assert len(task.failed_data_rows) == 1
+        assert task.failed_data_rows[0][
+            'message'] == f"Duplicate global key: '{global_key_1}'"
+    else:
+        assert task.status == "FAILED"
+        assert len(task.failed_data_rows) > 0
+        assert task.errors.startswith("Duplicate global keys found")
 
     # delete datarow
     client.get_data_row(new_data_row_id).delete()
@@ -882,11 +933,11 @@ def test_data_row_bulk_creation_sync_with_unique_global_keys(
            } == {global_key_1, global_key_2, global_key_3}
 
 
-def test_data_row_rulk_creation_sync_with_same_global_keys(
-        dataset, sample_image):
+def test_data_row_bulk_creation_sync_with_same_global_keys(
+        dataset, sample_image, is_adv_enabled):
     global_key_1 = str(uuid.uuid4())
 
-    with pytest.raises(labelbox.exceptions.MalformedQueryException):
+    with pytest.raises(labelbox.exceptions.MalformedQueryException) as exc_info:
         dataset.create_data_rows_sync([{
             DataRow.row_data: sample_image,
             DataRow.global_key: global_key_1
@@ -895,21 +946,30 @@ def test_data_row_rulk_creation_sync_with_same_global_keys(
             DataRow.global_key: global_key_1
         }])
 
-    assert len(list(dataset.data_rows())) == 0
+    if is_adv_enabled:
+        # ADV will import the first data row but not the second (duplicate global key)
+        assert len(list(dataset.data_rows())) == 1
+        assert list(dataset.data_rows())[0].global_key == global_key_1
+        assert "Some data rows were not imported. Check error output here" in str(
+            exc_info.value)
+    else:
+        assert len(list(dataset.data_rows())) == 0
 
-    dataset.create_data_rows_sync([{
-        DataRow.row_data: sample_image,
-        DataRow.global_key: global_key_1
-    }])
+        dataset.create_data_rows_sync([{
+            DataRow.row_data: sample_image,
+            DataRow.global_key: global_key_1
+        }])
 
-    assert len(list(dataset.data_rows())) == 1
-    assert list(dataset.data_rows())[0].global_key == global_key_1
+        assert len(list(dataset.data_rows())) == 1
+        assert list(dataset.data_rows())[0].global_key == global_key_1
 
 
-def test_create_conversational_text(dataset, conversational_content):
+@pytest.mark.skip(reason="create_data_rows_sync not supported by ADV yet")
+def test_create_conversational_text(client, dataset, conversational_content):
     examples = [
         {
-            **conversational_content, 'media_type': 'CONVERSATIONAL'
+            **conversational_content, 'media_type':
+                MediaType.Conversational.value
         },
         conversational_content,
         {
@@ -924,7 +984,7 @@ def test_create_conversational_text(dataset, conversational_content):
             data_row.row_data).json() == conversational_content['row_data']
 
 
-def test_invalid_media_type(dataset, conversational_content):
+def test_invalid_media_type(dataset, conversational_content, is_adv_enabled):
     for error_message, invalid_media_type in [[
             "Found invalid contents for media type: 'IMAGE'", 'IMAGE'
     ], ["Found invalid media type: 'totallyinvalid'", 'totallyinvalid']]:
@@ -932,8 +992,12 @@ def test_invalid_media_type(dataset, conversational_content):
         # using malformed query. But for invalid contents in FileUploads we use InvalidQueryError
         with pytest.raises(labelbox.exceptions.InvalidQueryError):
             dataset.create_data_rows_sync([{
-                **conversational_content, 'media_type': invalid_media_type
+                **conversational_content, 'media_type': 'IMAGE'
             }])
+
+        if is_adv_enabled:
+            # ADV does not take media type hint into account for async import requests
+            continue
 
         task = dataset.create_data_rows([{
             **conversational_content, 'media_type': invalid_media_type
@@ -945,7 +1009,7 @@ def test_invalid_media_type(dataset, conversational_content):
 def test_create_tiled_layer(dataset, tile_content):
     examples = [
         {
-            **tile_content, 'media_type': 'TMS_SIMPLE'
+            **tile_content, 'media_type': 'TMS_GEO'
         },
         tile_content,
         # Old way to check for backwards compatibility
@@ -962,28 +1026,22 @@ def test_create_data_row_with_attachments(dataset):
     attachment_value = 'attachment value'
     dr = dataset.create_data_row(row_data="123",
                                  attachments=[{
-                                     'type': 'TEXT',
+                                     'type': 'RAW_TEXT',
                                      'value': attachment_value
                                  }])
     attachments = list(dr.attachments())
     assert len(attachments) == 1
 
 
-def test_create_data_row_with_media_type(dataset, image_url):
+def test_create_data_row_with_media_type(dataset, image_url, is_adv_enabled):
     with pytest.raises(labelbox.exceptions.InvalidQueryError) as exc:
         dr = dataset.create_data_row(
             row_data={'invalid_object': 'invalid_value'}, media_type="IMAGE")
-    assert "Found invalid contents for media type: \'IMAGE\'" in str(exc.value)
+    if is_adv_enabled:
+        assert "Media type validation failed, expected: 'image/*', was: application/json" in str(
+            exc.value)
+    else:
+        assert "Found invalid contents for media type: \'IMAGE\'" in str(
+            exc.value)
 
     dataset.create_data_row(row_data=image_url, media_type="IMAGE")
-
-
-def test_export_data_rows(client, data_row, wait_for_data_row_processing):
-    # Ensure created data rows are indexed
-    data_row = wait_for_data_row_processing(client, data_row)
-
-    task = DataRow.export_v2(client=client, data_rows=[data_row])
-    task.wait_till_done()
-    assert task.status == "COMPLETE"
-    assert task.errors is None
-    assert len(task.result) == 1

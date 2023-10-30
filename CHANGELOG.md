@@ -1,4 +1,55 @@
 # Changelog
+# Version 3.54.1 (2023-10-17)
+## Notebooks
+* Revised the notebooks to update outdated examples when using `client.create_project()` to create a project
+
+# Version 3.54.0 (2023-10-10)
+## Added
+* Add exports v1 deprecation warning
+* Create method in SDK to modify LPO priorities in bulk
+## Removed
+*  Remove backoff library
+
+# Version 3.53.0 (2023-10-03)
+## Added
+* Remove LPO deprecation warning and allow greater range of priority values
+* Add an sdk method to get data row by global key
+* Disallow invalid quality modes during create_project
+* Python 3.10 support
+* Change return of dataset.create_data_rows() to Task
+* Add new header to capture python version
+## Notebooks
+* Updated examples to match latest updates to SDK
+
+# Version 3.52.0 (2023-08-24)
+## Added
+* Added methods to create multiple batches for a project from a list of data rows
+* Limit the number of data rows to be checked for processing status
+
+# Version 3.51.0 (2023-08-14)
+## Added
+* Added global keys to export v2 filters for project, dataset and DataRow
+* Added workflow task status filtering for export v2
+
+ ## Notebooks
+* Removed labels notebook, since almost all of the relevant methods in the notebook were not compatible with workflow paradigm.
+* Updated project.ipynb to use batches not datasets
+
+# Version 3.50.0 (2023-08-04)
+## Added
+ * Support batch_ids filter for projects in Exports v2
+ * Added access_from field to project members to differentiate project-based roles from organization level roles
+ * Ability to use data_row_ids instead of the whole data row object for DataRow.export_V2()
+ * Cursor-based pagination for dataset.data_rows()
+
+ ## Fixed
+ * client.get_projects() unable to fetch details for LLM projects
+
+ ## Notebooks
+ * Improved the documentation for `examples/basics/custom_embeddings.ipynb`
+ * Updated the documentation for `examples/basics/data_row_metadata.ipynb`
+ * Added details about CRUD methods to `examples/basics/ontologies.ipynb`
+
 # Version 3.49.1 (2023-06-29)
 ## Fixed
 * Removed numpy version lock that caused Python version >3.8 to download incompatible numpy version
