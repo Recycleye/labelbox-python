@@ -18,5 +18,5 @@ requests==2.31.0
 shapely
 tqdm
 typeguard==2.13.3
-typing-extensions==4.5.0
+typing-extensions==4.8.0
 numpy
