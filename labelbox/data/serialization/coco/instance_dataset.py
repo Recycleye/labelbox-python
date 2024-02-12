@@ -258,7 +258,7 @@ class CocoInstanceDataset(BaseModel):
                             class_annotations, category_lookup[
                                 class_annotations.category_id].name))
                 elif isinstance(class_annotations.segmentation, list):
-                    if len(class_annotations.segmentation) == 0 and len(class_annotations.bbox) == 4:
+                    if (len(class_annotations.segmentation) == 0 or len(class_annotations.segmentation[0]) == 8) and len(class_annotations.bbox) == 4:
                         annotations.extend(bbox_to_common(
                             class_annotations, category_lookup[
                                 class_annotations.category_id].name))
